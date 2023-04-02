@@ -1,0 +1,142 @@
+Step 1:
+
+create a EC2 instance. Amazon Elastic Compute Cloud (Amazon EC2) provides scalable computing capacity in the cloud.
+
+EC2 instance creation
+T2.Micro (AMI: amzn2-ami-kernel-5.10-hvm-2.0.20230207.0-x86_64-gp2)
+
+Create security group
+Allow ssh port 22, http port 80 and map with EC2 instance
+
+Docker Installation
+Docker is an open platform for developing, shipping, and running applications. Docker image is a read-only template with instructions for creating a Docker container.
+
+    sudo yum update -y
+    sudo amazon-linux-extras install docker
+    sudo service docker start
+    sudo systemctl enable docker
+    sudo usermod -a -G docker ec2-user
+    sudo docker info
+
+Create a Docker Image and run
+
+vi Dockerfile
+            FROM ubuntu:18.04
+
+            # Install dependencies
+            RUN apt-get update && \
+            apt-get -y install apache2
+
+            # Install apache and write Fargate POC message
+            RUN echo 'Fargate-ECS POC!' > /var/www/html/index.html
+
+            # Configure apache
+            RUN echo '. /etc/apache2/envvars' > /root/run_apache.sh && \
+            echo 'mkdir -p /var/run/apache2' >> /root/run_apache.sh && \
+            echo 'mkdir -p /var/lock/apache2' >> /root/run_apache.sh && \ 
+            echo '/usr/sbin/apache2 -D FOREGROUND' >> /root/run_apache.sh && \ 
+            chmod 755 /root/run_apache.sh
+
+            EXPOSE 80
+
+            CMD /root/run_apache.sh
+ sudo docker build -t hello-fargate-ecs .
+ sudo docker images --filter reference=hello-fargate-ecs
+ docker run -t -i -p 80:80 hello-fargate-ecs
+
+
+step 2:
+
+To communicqate two different services (EC2 --> ECR) 
+
+By using IAM Role.
+
+Create IAM role (IAM --> Roles --> "AmazonEC2ContainerRegistryFullAccess") and map with EC2 instance.
+
+Create ECR and push image
+Amazon Elastic Container Registry (Amazon ECR) is an AWS managed container image registry service that is secure, scalable, and reliable. It's similar to Docker Hub.
+
+Login into EC2 to execute below commands. Make sure IAM Role mapped before we execute below commands.
+
+aws ecr create-repository --repository-name hello-fargate-ecs-repository --region us-west-2
+docker tag hello-fargate-ecs <awsaccount>.dkr.ecr.us-west-2.amazonaws.com/hello-fargate-ecs-repository
+aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin <awsaccount>.dkr.ecr.us-west-2.amazonaws.com
+docker push <awsaccount>.dkr.ecr.us-west-2.amazonaws.com/hello-fargate-ecs-repository
+
+
+Create a amazon ecr repository (2.jpeg)
+
+create a fargate ECS cluster (3.png)
+
+Task Definitions Creation
+Task definition is a template. A task definition is required to run Docker containers in Amazon ECS. The Task definition allows you to specify which Docker image to use, which ports to expose, how much CPU and memory to allocate, how to collect logs, and define environment variables.
+
+open ecs --> create new task definition
+
+configure task definition and containers (4.jpeg, 5.png, 6.png, 7.jpeg)
+
+Run Task by enabling public IP
+An ECS task can consist of one or more containers that work together to perform a specific function. Task definition is used to define the configuration of a task. The task definition includes information such as the Docker image to use, the resources required, the container port mappings, and any data volumes to be mounted.
+
+8.png 9.png
+
+Make sure Public IP "Turned on" which will be used to hit from browser.
+
+10.png 11.png 12.png 
+
+
+Task Running successfully and we could see public IP.
+
+13.png 14.png
+
+15.png
+
+Delete the task once verified. We will use ALB, ECS Service in our next verification method.
+
+step 3:
+
+ALB (Application Load Balancer) distributes incoming traffic to multiple targets such as EC2 instances, containers, and Lambda functions, based on rules and conditions defined by the user.
+
+ALB Target Group is a logical grouping of targets (such as EC2 instances or containers) that receive traffic from an Application Load Balancer based on the rules and conditions set by the user, allowing for efficient distribution of traffic and improved application availability and scalability.
+
+Target Group Creation
+Make sure to select "IP addresses" when creating target group.
+
+
+16.png 17.png 
+
+
+Create ALB by mapping created target group.
+
+18.png 19.png 20.png
+
+create ECS Service 
+ECS Service is used to guarantee that we always have some number of Tasks running at all times. Another very important point is that a Service can be configured to use a load balancer. Service will automatically register the container's EC2 instance with the load balancer.
+Tasks cannot be configured to use a load balancer, only Services can. If a Task's container exits due to an error, or the underlying EC2 instance fails and is replaced, the ECS Service will replace the failed Task.
+
+21.png
+
+Make sure to select Launch type as "FARGATE".
+
+22.png
+
+We already have ALB and target group ready. Make sure to map existing ALB and target group.
+
+23.png 24.png
+
+Service deployment completed successfully. Desired tasks are running successfully.
+
+25.png 
+
+Target group is healthy and registered automatically with task's public IP.
+
+26.png 
+
+We can hit ALB URL from browser now.
+
+27.png
+
+Custom domain can be configured with Route53.
+
+Note: Enterprise usually use "Private Subnet" for such configurations. End point configurations are required to establish communication
+
